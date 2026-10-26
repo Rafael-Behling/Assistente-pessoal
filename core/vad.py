@@ -10,7 +10,7 @@ from scipy.io import wavfile
 
 
 class VADListener:
-    def __init__(self, config, on_utterance, sample_rate=16000, block_ms=30):
+    def __init__(self, config, on_utterance, barge=None, on_barge_in=None, sample_rate=16000, block_ms=30):
         cfg = config.get('vad', {})
         self.sample_rate = sample_rate
         self.block_ms = block_ms
@@ -52,9 +52,15 @@ class VADListener:
         self.thread = None
         self.noise_floor = None
         self.current_rms = 0.0
+        self.barge = barge
+        self.on_barge_in = on_barge_in
+        self.monitoring = False
+        self.barge_requested = False
 
     def _callback(self, indata, frames, time_info, status):
-        if self.paused or not self.running:
+        if not self.running:
+            return
+        if self.paused and not self.monitoring:
             return
         frame = indata[:, 0]
         self.current_rms = float(np.sqrt(np.mean(frame ** 2)))
@@ -78,14 +84,60 @@ class VADListener:
     def _process(self, audio):
         path = self._save(audio)
         self.paused = True
+        self.barge_requested = False
+        self.monitoring = self.barge is not None and self.on_barge_in is not None
+        watcher = None
+        if self.monitoring:
+            watcher = threading.Thread(target=self._barge_watch, daemon=True)
+            watcher.start()
         try:
             self.on_utterance(path)
         except Exception as e:
             print(f"[VAD] Erro ao processar fala: {e}")
         finally:
-            time.sleep(0.4)
-            self._drain()
-            self.paused = False
+            self.monitoring = False
+            if watcher:
+                watcher.join(timeout=3)
+            if self.barge_requested:
+                self.barge_requested = False
+                self.paused = False
+            else:
+                time.sleep(0.4)
+                self._drain()
+                self.paused = False
+
+    def _barge_watch(self):
+        watch_frames = max(4, int(2500 / self.block_ms))
+        check_every = max(1, int(1200 / self.block_ms))
+        buf = deque(maxlen=watch_frames)
+        since_check = check_every
+        last_match = False
+        while self.monitoring and not self.barge_requested:
+            try:
+                frame = self.queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            buf.append(frame)
+            since_check += 1
+            if since_check < check_every or len(buf) < watch_frames * 0.6:
+                continue
+            since_check = 0
+            try:
+                audio = np.concatenate(buf)
+                path = self._save(audio)
+                text = self.barge.wake_transcribe(path)
+                match = bool(text) and self.barge.is_wake(text)
+                if match and last_match:
+                    self.barge_requested = True
+                    print("[VAD] Barge-in: nome detectado durante a resposta")
+                    try:
+                        self.on_barge_in()
+                    except Exception as e:
+                        print(f"[VAD] Erro no barge-in: {e}")
+                    return
+                last_match = match
+            except Exception as e:
+                print(f"[VAD] Erro no monitor de voz: {e}")
 
     def _loop(self):
         pre_roll = deque(maxlen=self.pre_roll_frames)

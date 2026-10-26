@@ -73,7 +73,12 @@ class OrbWidget(QWidget):
         except Exception as e:
             print(f"[ORB] Atalho de interrupção indisponível: {e}")
 
-        self.vad = VADListener(self.brain.config, self.on_utterance)
+        self.vad = VADListener(
+            self.brain.config,
+            self.on_utterance,
+            barge=self.brain if self.brain.barge_enabled else None,
+            on_barge_in=self._on_barge_in,
+        )
         try:
             self.vad.start()
             print("[ORB] Microfone aberto - fale quando quiser")
@@ -124,6 +129,10 @@ class OrbWidget(QWidget):
         self.brain.speak(sentence)
 
     def _on_stop_hotkey(self):
+        self.brain.cancel_speech()
+
+    def _on_barge_in(self):
+        self.state_signal.emit("listening")
         self.brain.cancel_speech()
 
     def _notify(self, text):

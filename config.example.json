@@ -9,7 +9,8 @@
       "sexta feira",
       "sexta"
     ],
-    "session_timeout_s": 20
+    "session_timeout_s": 20,
+    "barge_in": true
   },
   "vad": {
     "energy_threshold": 0.0015,

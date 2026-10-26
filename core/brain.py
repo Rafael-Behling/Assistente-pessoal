@@ -56,6 +56,7 @@ class Brain:
         self.llm = self.init_llm()
         self.commands = Commands(memory=self.memory, config=self.config)
         self._cancelled = False
+        self._barge_active = False
         self.warmup = self.config.get('llm', {}).get('warmup', True)
         if self.warmup and type(self.llm).__name__ == 'OllamaProvider':
             threading.Thread(target=self._warmup_llm, daemon=True).start()
@@ -158,6 +159,8 @@ class Brain:
             self.history = self.history[-10:]
 
     def handle_utterance(self, audio_path, on_sentence=None):
+        self._cancelled = False
+        self._barge_active = False
         self.last_stt_s = 0
         if self.stt_wake is not None:
             fast_text = self.transcribe_audio(audio_path, stt=self.stt_wake, initial_prompt=self.wake_prompt, delete=False)
@@ -202,6 +205,20 @@ class Brain:
         print("[BRAIN] Interrompido")
         self._cancelled = True
         self.tts.stop()
+
+    def wake_transcribe(self, audio_path):
+        if self.stt_wake is None:
+            return ''
+        return self.stt_wake.transcribe(audio_path, initial_prompt=self.wake_prompt)
+
+    def is_wake(self, text):
+        if not text:
+            return False
+        return self._find_wake(self._norm_wake(text)) is not None
+
+    @property
+    def barge_enabled(self):
+        return bool(self.stt_wake) and self.config.get('activation', {}).get('barge_in', True)
 
     def start_listening(self):
         self.listener.start_recording()
@@ -257,7 +274,8 @@ class Brain:
         )
         system_prompt += (
             "\n\nSua resposta será lida em voz alta. Não use markdown, listas, títulos ou símbolos. "
-            "Escreva números por extenso quando fizer sentido para a fala."
+            "Escreva números por extenso quando fizer sentido para a fala. "
+            "Nunca diga o seu próprio nome na resposta."
         )
         if self.config.get('web_search', {}).get('enabled', True) and looks_like_knowledge_question(normalize(query)):
             context = search_context(query)
@@ -277,7 +295,7 @@ class Brain:
             parts = []
             pending = ''
             for chunk in self.llm.chat_stream(messages):
-                if self._cancelled:
+                if self._cancelled or self._barge_active:
                     print("[BRAIN] Stream cancelado")
                     break
                 pending += chunk
@@ -290,11 +308,11 @@ class Brain:
                     if sentence:
                         parts.append(sentence)
                         on_sentence(sentence)
-                        if self._cancelled:
+                        if self._cancelled or self._barge_active:
                             break
-                if self._cancelled:
+                if self._cancelled or self._barge_active:
                     break
-            if pending.strip() and not self._cancelled:
+            if pending.strip() and not (self._cancelled or self._barge_active):
                 parts.append(pending.strip())
                 on_sentence(pending.strip())
             full = ' '.join(parts).strip()
@@ -302,7 +320,7 @@ class Brain:
             full = self.llm.chat(messages)
             if not full:
                 full = "Não consegui processar sua solicitação."
-            if on_sentence is not None:
+            if on_sentence is not None and not (self._cancelled or self._barge_active):
                 on_sentence(full)
         self.last_llm_s = time.perf_counter() - start_llm
         self.last_model = self.llm.model
@@ -323,4 +341,6 @@ class Brain:
         )
     
     def speak(self, text):
+        if self._cancelled or self._barge_active:
+            return
         self.tts.speak(text)

@@ -5,7 +5,7 @@ Assistente pessoal de voz para Linux (Wayland/X11), com IA local por padrão (Ol
 ## O que ela faz
 
 - **Ativação por voz**: só responde quando você chama "Sexta-Feira" (configurável); depois disso fica em conversa aberta e adormece após ~20s sem interação. O nome é reconhecido com um modelo Whisper `tiny` (resposta rápida) e o comando é transcrito com o modelo principal
-- **Interrupção**: `Ctrl+X` interrompe o que ela está falando/pensando na hora; `Ctrl+E` fecha o orb
+- **Interrupção**: diga "Sexta-Feira" **enquanto ela fala/pensa** e ela para na hora para te ouvir (barge-in); `Ctrl+X` também interrompe; `Ctrl+E` fecha o orb
 - **Voz**: transcrição local (faster-whisper), fala (edge-tts) em streaming (frase por frase), detecção de fala por VAD (energia ou Silero opcional)
 - **Aquecimento**: o modelo do Ollama é pré-carregado no boot (sem espera na primeira pergunta)
 - **Comandos instantâneos** (sem LLM): horas/data, clima (wttr.in), abrir navegador/sites/pastas/apps, pesquisar na web, organizar área de trabalho, volume, música (playerctl), timers, captura de tela, bloquear tela, notícias (RSS)
@@ -68,6 +68,7 @@ Edite `config.json` (ou pelo menu gráfico ao abrir sem voz) — veja `config.ex
 | `activation.session_timeout_s` | Segundos de silêncio até adormecer |
 | `vad.engine` | `energy` (padrão) ou `silero` (requer `pip install silero-vad`) |
 | `stt.model` | Modelo Whisper (`tiny`, `base`, `small`...) |
+| `activation.barge_in` | Interromper com a voz enquanto ela fala (precisa `stt.wake_model`) |
 | `llm.mode` | `local` (Ollama) ou `api` (OpenRouter, precisa `api_key`) |
 | `weather.location` | Cidade para o clima (vazio = por IP) |
 
