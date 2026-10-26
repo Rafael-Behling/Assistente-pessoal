@@ -7,7 +7,7 @@ import time
 import unicodedata
 import webbrowser
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -125,6 +125,84 @@ HELP_TEXT = (
     'organizar a área de trabalho, controlar o volume e a música, tirar capturas de tela, definir timers, '
     'ler notícias, anotar coisas que você me diz e bloquear a tela.'
 )
+
+
+PT_NUMBERS = {
+    'zero': 0, 'um': 1, 'uma': 1, 'dois': 2, 'duas': 2, 'tres': 3, 'quatro': 4, 'cinco': 5,
+    'seis': 6, 'sete': 7, 'oito': 8, 'nove': 9, 'dez': 10, 'onze': 11, 'doze': 12,
+    'treze': 13, 'quatorze': 14, 'catorze': 14, 'quinze': 15, 'dezesseis': 16,
+    'dezessete': 17, 'dezoito': 18, 'dezenove': 19,
+    'vinte': 20, 'trinta': 30, 'quarenta': 40, 'cinquenta': 50, 'sessenta': 60,
+    'setenta': 70, 'oitenta': 80, 'noventa': 90, 'cem': 100,
+}
+
+
+def pt_number_in_text(text):
+    for word, value in PT_NUMBERS.items():
+        if re.search(rf'\b{word}\b', text):
+            return value
+    return None
+
+
+def parse_reminder_time(q, now=None):
+    now = now or datetime.now()
+    day = 0
+    if re.search(r'\bamanha\b', q):
+        day = 1
+    else:
+        for i, wd in enumerate(WEEKDAYS):
+            if re.search(rf'\b{wd}\b', q):
+                day = (i - now.weekday()) % 7
+                if day == 0:
+                    day = 7
+                break
+    hh = mm = None
+    m = re.search(r'\bas\s+(\d{1,2})(?:h\s*(\d{2})?|:\s*(\d{2}))?', q)
+    if m:
+        hh, mm = int(m.group(1)), int(m.group(2) or m.group(3) or 0)
+    if hh is None:
+        m = re.search(r'\b(\d{1,2})\s*h(?:\s*(\d{2}))?\b', q)
+        if m:
+            hh, mm = int(m.group(1)), int(m.group(2) or 0)
+    if hh is None:
+        m = re.search(r'\b(\d{1,2}):(\d{2})\b', q)
+        if m:
+            hh, mm = int(m.group(1)), int(m.group(2))
+    if hh is None and day:
+        if 'de manha' in q:
+            hh, mm = 9, 0
+        elif 'de tarde' in q:
+            hh, mm = 15, 0
+        elif 'de noite' in q:
+            hh, mm = 20, 0
+        else:
+            hh, mm = 10, 0
+    if hh is None or not 0 <= hh <= 23 or mm is None or not 0 <= mm <= 59:
+        return None
+    target = (now + timedelta(days=day)).replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if target <= now:
+        if day:
+            return None
+        target += timedelta(days=1)
+    return target
+
+
+def format_reminder(target):
+    day_word = 'hoje' if target.date() == datetime.now().date() else 'amanhã'
+    return f'{day_word} às {target.hour}h{target.minute:02d}'
+
+
+def _strip_reminder_text(q):
+    task = q
+    m = re.search(r'\b(?:lembra|lembrar|avisa|avisar|lembre|recorde)(?:\s+(?:de|que|para|pra|a|sobre))?\s*(.+)$', task)
+    if m:
+        task = m.group(1)
+    task = re.sub(
+        r'\b(?:hoje|amanha|de manha|de tarde|de noite|segunda|terca|quarta|quinta|sexta|sabado|domingo|'
+        r'as?\s*\d{1,2}(?::\d{2})?|as?\s*\d{1,2}\s*h(?:\s*\d{2})?|horas?|hora|daqui a|dia \d{1,2})\b',
+        ' ', task,
+    )
+    return re.sub(r'\s+', ' ', task).strip(' ,.!?;:')
 
 
 def format_time(now=None):
@@ -389,6 +467,8 @@ class Commands:
             r'\b(?:volume|som)\b.*\b(?:aument\w*|subi\w*|diminui\w*|baix\w*|reduz\w*)\b',
             r'\b(?:silenci\w*|mutar|mudo|sem som|dessilenci\w*|desmutar)\b',
             r'\b(?:volume|som)\b.*\d',
+            r'\b(?:volume|som)\b.*\b(?:zero|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem)\b',
+            r'\b(?:zero|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|vinte|trinta|quarenta|cinquenta|sessenta|setenta|oitenta|noventa|cem)\b.*\b(?:volume|som)\b',
         ], self.cmd_volume)
 
         self._add('weather', [
@@ -403,6 +483,12 @@ class Commands:
             r'\b(?:me )?avis\w*\b.*\b(?:em|daqui)\b',
             r'\bdaqui (?:a )?\d+\s*(?:segundos?|minutos?|horas?)\b',
         ], self.cmd_timer)
+
+        self._add('reminder', [
+            r'\b(?:lembra|lembrar|avisa|avisar|lembre me|lembre-me|recorde)\b.*\b(?:amanha|hoje|segunda|terca|quarta|quinta|sexta|sabado|domingo)\b',
+            r'\b(?:amanha|hoje)\s+(?:as|a)?\s*\d{1,2}(?:h|:|\s*horas?)',
+            r'\b(?:lembra|avisar|lembre)\b.*\bas\s*\d{1,2}',
+        ], self.cmd_reminder)
 
         self._add('media', [
             r'\b(?:paus\w*|despaus\w*|parar|continuar|tocar|play|proxim\w*|pular|avanca)\b.*\b(?:musica|som|video|media|spotify|player|track)\b',
@@ -536,6 +622,13 @@ class Commands:
                 pct = _volume_percent()
                 return f'Volume em {pct}%.' if pct is not None else 'Volume diminuído.'
             exact = re.search(r'\b(?:volume|som)\b\s*(?:para|em|a)?\s*(\d{1,3})\s*%?', q)
+            if not exact:
+                num = pt_number_in_text(q)
+                if num is not None:
+                    exact_num = f'{num}'
+                    value = max(0, min(100, num))
+                    _wpctl('set-volume', '@DEFAULT_AUDIO_SINK@', f'{value}%')
+                    return f'Volume em {value}%.'
             if exact:
                 value = max(0, min(100, int(exact.group(1))))
                 _wpctl('set-volume', '@DEFAULT_AUDIO_SINK@', f'{value}%')
@@ -665,6 +758,18 @@ class Commands:
         if self.memory:
             self.memory.clear_facts()
         return 'Apaguei tudo que sabia sobre você.'
+
+    def cmd_reminder(self, original, q):
+        target = parse_reminder_time(q)
+        if target is None:
+            return 'Para quando é o lembrete? Ex: amanhã às 9.'
+        task = _strip_reminder_text(q)
+        if not task:
+            task = 'Você pediu para lembrar algo'
+        if self.memory:
+            self.memory.add_reminder(target.isoformat(timespec='seconds'), task)
+            return f'Ok, lembrete para {format_reminder(target)}: {task}.'
+        return 'Não tenho memória disponível para lembretes.'
 
     def cmd_screenshot(self, original, q):
         tool, path = _screenshot_tool()

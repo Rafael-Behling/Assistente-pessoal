@@ -1,6 +1,8 @@
 import sys
 import math
 import time
+import shutil
+import subprocess
 import os
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QWidget
@@ -11,6 +13,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from core.brain import Brain
 from core.vad import VADListener
 from core.global_hotkey import GlobalHotkey
+from core.log import setup_log
 
 
 class OrbWidget(QWidget):
@@ -103,6 +106,7 @@ class OrbWidget(QWidget):
                 return
             transcript, query, response = outcome
             self.brain.log_turn(transcript, response)
+            self._notify(response)
 
             if not self._speaking_started:
                 self.state_signal.emit("speaking")
@@ -121,6 +125,18 @@ class OrbWidget(QWidget):
 
     def _on_stop_hotkey(self):
         self.brain.cancel_speech()
+
+    def _notify(self, text):
+        exe = shutil.which('notify-send')
+        if not exe or not text:
+            return
+        try:
+            subprocess.Popen(
+                [exe, '-a', 'Sexta-Feira', 'Sexta-Feira', text],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
 
     def update_pulse(self):
         t = time.monotonic() - self.t0
@@ -226,6 +242,7 @@ class OrbWidget(QWidget):
 
 
 def main():
+    setup_log(Path(__file__).parent.parent / "data" / "orb.log")
     app = QApplication(sys.argv)
     orb = OrbWidget()
     orb.show()

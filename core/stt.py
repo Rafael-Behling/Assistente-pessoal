@@ -7,14 +7,27 @@ from scipy.io import wavfile
 
 
 class STT:
-    def __init__(self, model_size="base", device="cpu", compute_type="int8", language="pt", beam_size=1):
+    def __init__(self, model_size="base", device="auto", compute_type=None, language="pt", beam_size=1):
         self.model = None
         self.model_size = model_size
-        self.device = device
-        self.compute_type = compute_type
+        self.device, detected = self._detect_device(device)
+        self.compute_type = compute_type or ('int8_float16' if detected == 'cuda' else 'int8')
         self.language = language
         self.beam_size = beam_size
         self._lock = threading.Lock()
+
+    @staticmethod
+    def _detect_device(device):
+        if device and device != 'auto':
+            return device, device
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                print("[STT] GPU CUDA detectada")
+                return 'cuda', 'cuda'
+        except Exception:
+            pass
+        return 'cpu', 'cpu'
 
     def load_model(self):
         with self._lock:

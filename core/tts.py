@@ -17,21 +17,31 @@ class TTS:
             config_path = Path(__file__).parent.parent / "config.json"
         self.config_path = config_path
         self.load_config()
-    
+        self._player_proc = None
+
     def load_config(self):
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.config = json.load(f)
-        except:
+        except Exception as e:
+            print(f"[TTS] Falha ao carregar config: {e}")
             self.config = {"voice": None, "volume": 1.0, "rate": 1.0}
-    
+
     def save_config(self):
         with open(self.config_path, 'w', encoding='utf-8') as fjson:
             json.dump(self.config, fjson, indent=2, ensure_ascii=False)
-    
+
     def get_voice(self):
         return self.config.get("voice")
-    
+
+    def _piper_available(self):
+        cfg = self.config.get('tts', {})
+        engine = cfg.get('engine', 'auto')
+        if engine == 'edge':
+            return False
+        model = cfg.get('piper_voice', '')
+        return engine in ('piper', 'auto') and bool(model) and bool(shutil.which('piper')) and Path(model).exists()
+
     def _play_audio(self, path):
         players = {
             'mpv': ['--no-video', '--quiet'],
@@ -51,7 +61,7 @@ class TTS:
         print("[TTS] Nenhum player de áudio encontrado")
 
     def stop(self):
-        proc = getattr(self, '_player_proc', None)
+        proc = self._player_proc
         if proc and proc.poll() is None:
             try:
                 proc.terminate()
@@ -63,13 +73,38 @@ class TTS:
                 pass
         self._player_proc = None
 
+    def _speak_piper(self, text, model=None):
+        model = model or self.config.get('tts', {}).get('piper_voice', '')
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+        path = temp.name
+        temp.close()
+        try:
+            subprocess.run(
+                ['piper', '--model', model, '--output_file', path],
+                input=text.encode('utf-8'), check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            self._play_audio(path)
+        except Exception as e:
+            print(f"[TTS] Piper falhou: {e}")
+            return False
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
+        return True
+
     async def speak_async(self, text, voice=None):
-        if not edge_tts:
-            print("edge-tts não instalado")
-            return
         voice = voice or self.get_voice()
         if not voice:
             print("Nenhuma voz selecionada")
+            return
+        if self._piper_available():
+            if await asyncio.to_thread(self._speak_piper, text):
+                return
+        if not edge_tts:
+            print("edge-tts não instalado")
             return
         temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
         path = temp.name
@@ -83,10 +118,10 @@ class TTS:
                 os.unlink(path)
             except Exception:
                 pass
-    
+
     def speak(self, text, voice=None):
         asyncio.run(self.speak_async(text, voice))
-    
+
     @staticmethod
     async def _list_voices_async():
         if not edge_tts:
@@ -94,7 +129,7 @@ class TTS:
         voices = await edge_tts.list_voices()
         voices.sort(key=lambda x: (x['Locale'], x['ShortName']))
         return voices
-    
+
     @staticmethod
     def list_voices():
         if not edge_tts:
@@ -102,8 +137,4 @@ class TTS:
         try:
             return asyncio.run(TTS._list_voices_async())
         except Exception:
-            try:
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(TTS._list_voices_async())
-            except Exception:
-                return []
+            return []

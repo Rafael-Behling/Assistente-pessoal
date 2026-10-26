@@ -10,3 +10,5 @@ pytest
 
 # Opcional (VAD por rede neural, detecta fala melhor que energia):
 # silero-vad
+# Opcional (TTS offline, mais rápido que edge-tts):
+# piper-tts

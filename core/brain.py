@@ -18,6 +18,7 @@ from core.listener import Listener
 from core.stt import STT
 from core.memory import Memory
 from core.commands import Commands, normalize, format_date
+from core.websearch import looks_like_knowledge_question, search_context
 
 class Brain:
     def __init__(self, config_path=None):
@@ -58,6 +59,8 @@ class Brain:
         self.warmup = self.config.get('llm', {}).get('warmup', True)
         if self.warmup and type(self.llm).__name__ == 'OllamaProvider':
             threading.Thread(target=self._warmup_llm, daemon=True).start()
+        if self.config.get('reminders', {}).get('enabled', True):
+            threading.Thread(target=self._reminder_loop, daemon=True).start()
         self.last_transcript = None
         self.last_stt_s = None
         self.last_llm_s = None
@@ -71,6 +74,24 @@ class Brain:
             print("[BRAIN] LLM aquecido")
         except Exception:
             pass
+
+    def _reminder_loop(self):
+        from core.tts import TTS
+        from datetime import datetime
+        import subprocess
+        while True:
+            time.sleep(20)
+            try:
+                due = self.memory.due_reminders(datetime.now().isoformat(timespec='seconds'))
+                for r in due:
+                    print(f"[BRAIN] Lembrete: {r['text']}")
+                    try:
+                        subprocess.Popen(['notify-send', '-a', 'Sexta-Feira', 'Sexta-Feira - Lembrete', r['text']])
+                    except Exception:
+                        pass
+                    self.speak(f'Lembrete: {r["text"]}')
+            except Exception as e:
+                print(f"[BRAIN] Erro no loop de lembretes: {e}")
     
     def load_config(self):
         try:
@@ -234,6 +255,15 @@ class Brain:
             f"Data e hora atuais: {format_date(now)} {now:%H:%M}. "
             "Use essa informação para perguntas sobre data, hora ou eventos recentes."
         )
+        system_prompt += (
+            "\n\nSua resposta será lida em voz alta. Não use markdown, listas, títulos ou símbolos. "
+            "Escreva números por extenso quando fizer sentido para a fala."
+        )
+        if self.config.get('web_search', {}).get('enabled', True) and looks_like_knowledge_question(normalize(query)):
+            context = search_context(query)
+            if context:
+                print("[BRAIN] Usando contexto da web")
+                system_prompt += f"\n\nInformações da web (use como fonte atualizada):\n{context}"
 
         messages = [
             {"role": "system", "content": system_prompt},

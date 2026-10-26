@@ -12,6 +12,7 @@ class Memory:
             base_dir = Path(__file__).parent.parent / base_dir
         self.dir = base_dir / "conversas"
         self.facts_path = base_dir / "fatos.json"
+        self.reminders_path = base_dir / "lembretes.json"
 
     def load_facts(self):
         try:
@@ -39,6 +40,37 @@ class Memory:
                 json.dump([], f, ensure_ascii=False)
         except Exception as e:
             print(f"[MEMORY] Falha ao limpar fatos: {e}")
+
+    def _read_reminders(self):
+        try:
+            with open(self.reminders_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def _write_reminders(self, items):
+        try:
+            self.reminders_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.reminders_path, 'w', encoding='utf-8') as f:
+                json.dump(items, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[MEMORY] Falha ao salvar lembretes: {e}")
+
+    def add_reminder(self, when_iso, text):
+        items = self._read_reminders()
+        items.append({"when": when_iso, "text": text})
+        items.sort(key=lambda r: r["when"])
+        self._write_reminders(items)
+
+    def due_reminders(self, now_iso):
+        items = self._read_reminders()
+        due = [r for r in items if r["when"] <= now_iso]
+        if due:
+            self._write_reminders([r for r in items if r["when"] > now_iso])
+        return due
+
+    def count_reminders(self):
+        return len(self._read_reminders())
 
     def log_turn(self, transcript, response, stt_s=None, llm_s=None, command_s=None, model=None, command=None):
         if not self.enabled:
