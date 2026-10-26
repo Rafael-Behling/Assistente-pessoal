@@ -16,6 +16,7 @@ from core.global_hotkey import GlobalHotkey
 class OrbWidget(QWidget):
     state_signal = pyqtSignal(str)
     close_requested = pyqtSignal()
+    stop_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -53,14 +54,21 @@ class OrbWidget(QWidget):
         self.state_signal.connect(self.set_state)
 
         self.close_requested.connect(self.close, Qt.ConnectionType.QueuedConnection)
+        self.stop_requested.connect(self._on_stop_hotkey, Qt.ConnectionType.QueuedConnection)
         self.local_close = QShortcut(QKeySequence("Ctrl+E"), self)
         self.local_close.activated.connect(self.close)
 
-        self.hotkey = GlobalHotkey(self.close_requested.emit)
+        self.hotkey = GlobalHotkey(self.close_requested.emit, "ctrl+e")
         try:
             self.hotkey.start()
         except Exception as e:
             print(f"[ORB] Atalho global indisponível: {e}")
+
+        self.hotkey_stop = GlobalHotkey(self.stop_requested.emit, "ctrl+x")
+        try:
+            self.hotkey_stop.start()
+        except Exception as e:
+            print(f"[ORB] Atalho de interrupção indisponível: {e}")
 
         self.vad = VADListener(self.brain.config, self.on_utterance)
         try:
@@ -110,6 +118,9 @@ class OrbWidget(QWidget):
             self._speaking_started = True
             self.state_signal.emit("speaking")
         self.brain.speak(sentence)
+
+    def _on_stop_hotkey(self):
+        self.brain.cancel_speech()
 
     def update_pulse(self):
         t = time.monotonic() - self.t0
@@ -208,6 +219,7 @@ class OrbWidget(QWidget):
     def closeEvent(self, event):
         print("[ORB] Fechando...")
         self.hotkey.stop()
+        self.hotkey_stop.stop()
         self.vad.stop()
         event.accept()
         QApplication.instance().quit()

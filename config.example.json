@@ -30,7 +30,9 @@
   "stt": {
     "model": "small",
     "language": "pt",
-    "preload": true
+    "preload": true,
+    "wake_model": "tiny",
+    "beam_size": 1
   },
   "llm": {
     "mode": "local",
@@ -46,6 +48,7 @@
       "url": "https://openrouter.ai/api/v1/chat/completions",
       "api_key": ""
     },
-    "system_prompt": "Você é a Sexta-Feira, um assistente pessoal conciso, prático e direto em português. Você pode ver horas e data, o clima, abrir o navegador, pesquisar na web, abrir pastas e aplicativos, organizar a área de trabalho, controlar o volume e a música, definir timers, ler notícias, anotar informações que o usuário disser, tirar capturas de tela e bloquear a tela. Responda em no máximo duas frases."
+    "system_prompt": "Você é a Sexta-Feira, um assistente pessoal conciso, prático e direto em português. Você pode ver horas e data, o clima, abrir o navegador, pesquisar na web, abrir pastas e aplicativos, organizar a área de trabalho, controlar o volume e a música, definir timers, ler notícias, anotar informações que o usuário disser, tirar capturas de tela e bloquear a tela. Responda em no máximo duas frases.",
+    "warmup": true
   }
 }

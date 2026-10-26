@@ -62,7 +62,7 @@ class STT:
         gain = min(4.0, 0.9 / peak)
         return (audio * gain).astype(np.float32)
 
-    def transcribe(self, audio_path, language=None):
+    def transcribe(self, audio_path, language=None, initial_prompt=None, delete=True):
         if not os.path.exists(audio_path):
             return ""
         self.load_model()
@@ -77,6 +77,7 @@ class STT:
                 no_speech_threshold=0.6,
                 log_prob_threshold=-1.0,
                 temperature=0.0,
+                initial_prompt=initial_prompt or None,
             )
             text = " ".join([segment.text for segment in segments])
             return text.strip()
@@ -84,7 +85,8 @@ class STT:
             print(f"[STT] Erro: {e}")
             return ""
         finally:
-            try:
-                os.unlink(audio_path)
-            except Exception:
-                pass
+            if delete:
+                try:
+                    os.unlink(audio_path)
+                except Exception:
+                    pass

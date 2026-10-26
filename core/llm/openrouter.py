@@ -1,3 +1,4 @@
+import json
 import os
 import httpx
 from .base import LLMProvider
@@ -15,14 +16,8 @@ class OpenRouterProvider(LLMProvider):
         try:
             response = httpx.post(
                 self.url,
-                headers={
-                    'Authorization': f'Bearer {self.api_key}',
-                    'Content-Type': 'application/json',
-                },
-                json={
-                    'model': self.model,
-                    'messages': messages,
-                },
+                headers=self._headers(),
+                json={'model': self.model, 'messages': messages},
                 timeout=60,
             )
             response.raise_for_status()
@@ -31,3 +26,36 @@ class OpenRouterProvider(LLMProvider):
         except Exception as e:
             print(f"OpenRouter error: {e}")
             return ''
+
+    def chat_stream(self, messages, **kwargs):
+        if not self.api_key:
+            yield ''
+            return
+        try:
+            with httpx.stream(
+                'POST',
+                self.url,
+                headers=self._headers(),
+                json={'model': self.model, 'messages': messages, 'stream': True},
+                timeout=120,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line or not line.startswith('data: '):
+                        continue
+                    payload = line[6:]
+                    if payload.strip() == '[DONE]':
+                        break
+                    data = json.loads(payload)
+                    delta = data.get('choices', [{}])[0].get('delta', {}).get('content') or ''
+                    if delta:
+                        yield delta
+        except Exception as e:
+            print(f"OpenRouter error: {e}")
+            yield ''
+
+    def _headers(self):
+        return {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json',
+        }

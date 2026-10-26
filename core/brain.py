@@ -25,6 +25,13 @@ class Brain:
             config_path = Path(__file__).parent.parent / "config.json"
         self.config_path = config_path
         self.load_config()
+        act_cfg = self.config.get('activation', {})
+        self.wake_enabled = act_cfg.get('mode', 'always_on') == 'wake_word'
+        self.wake_words = [self._norm_wake(w) for w in act_cfg.get('wake_words', ['sexta feira'])]
+        self.wake_prompt = ', '.join(w.title() for w in self.wake_words[:1]) + '.'
+        self.session_timeout_s = float(act_cfg.get('session_timeout_s', 20))
+        self.session_open_until = 0.0
+        self.history = []
         self.listener = Listener()
         stt_cfg = self.config.get('stt', {})
         self.stt = STT(
@@ -32,24 +39,38 @@ class Brain:
             language=stt_cfg.get('language', 'pt'),
             beam_size=stt_cfg.get('beam_size', 1),
         )
+        self.stt_wake = None
+        if self.wake_enabled and stt_cfg.get('wake_model', 'tiny'):
+            self.stt_wake = STT(
+                model_size=stt_cfg.get('wake_model', 'tiny'),
+                language=stt_cfg.get('language', 'pt'),
+                beam_size=1,
+            )
+            if stt_cfg.get('preload', True):
+                threading.Thread(target=self.stt_wake.load_model, daemon=True).start()
         if stt_cfg.get('preload', True):
             threading.Thread(target=self.stt.load_model, daemon=True).start()
         self.tts = TTS(config_path)
         self.memory = Memory(self.config.get('memory', {}))
         self.llm = self.init_llm()
         self.commands = Commands(memory=self.memory, config=self.config)
-        act_cfg = self.config.get('activation', {})
-        self.wake_enabled = act_cfg.get('mode', 'always_on') == 'wake_word'
-        self.wake_words = [self._norm_wake(w) for w in act_cfg.get('wake_words', ['sexta feira'])]
-        self.session_timeout_s = float(act_cfg.get('session_timeout_s', 20))
-        self.session_open_until = 0.0
-        self.history = []
+        self._cancelled = False
+        self.warmup = self.config.get('llm', {}).get('warmup', True)
+        if self.warmup and type(self.llm).__name__ == 'OllamaProvider':
+            threading.Thread(target=self._warmup_llm, daemon=True).start()
         self.last_transcript = None
         self.last_stt_s = None
         self.last_llm_s = None
         self.last_command_s = None
         self.last_command = None
         self.last_model = None
+
+    def _warmup_llm(self):
+        try:
+            self.llm.chat([{'role': 'user', 'content': 'oi'}])
+            print("[BRAIN] LLM aquecido")
+        except Exception:
+            pass
     
     def load_config(self):
         try:
@@ -116,13 +137,32 @@ class Brain:
             self.history = self.history[-10:]
 
     def handle_utterance(self, audio_path, on_sentence=None):
-        text = self.transcribe_audio(audio_path)
-        if not text:
-            return None
-        matched, query, needs_attention = self.check_wake(text)
-        if not matched:
-            print("[BRAIN] Sem palavra de ativação, ignorando")
-            return None
+        self.last_stt_s = 0
+        if self.stt_wake is not None:
+            fast_text = self.transcribe_audio(audio_path, stt=self.stt_wake, initial_prompt=self.wake_prompt, delete=False)
+            if not fast_text:
+                self._delete_audio(audio_path)
+                return None
+            matched, _, _ = self.check_wake(fast_text)
+            if not matched:
+                print("[BRAIN] Sem palavra de ativação, ignorando")
+                self._delete_audio(audio_path)
+                return None
+            text = self.transcribe_audio(audio_path)
+            if not text:
+                return None
+            matched, query, needs_attention = self.check_wake(text)
+            if not matched:
+                self.session_open_until = time.monotonic() + self.session_timeout_s
+                matched, query, needs_attention = True, self._norm_wake(text), False
+        else:
+            text = self.transcribe_audio(audio_path)
+            if not text:
+                return None
+            matched, query, needs_attention = self.check_wake(text)
+            if not matched:
+                print("[BRAIN] Sem palavra de ativação, ignorando")
+                return None
         if needs_attention:
             response = 'Sim?'
             if on_sentence:
@@ -131,14 +171,26 @@ class Brain:
         response = self.think(query, on_sentence)
         return (text, query, response)
 
+    def _delete_audio(self, audio_path):
+        try:
+            os.unlink(audio_path)
+        except Exception:
+            pass
+
+    def cancel_speech(self):
+        print("[BRAIN] Interrompido")
+        self._cancelled = True
+        self.tts.stop()
+
     def start_listening(self):
         self.listener.start_recording()
     
-    def transcribe_audio(self, audio_path):
+    def transcribe_audio(self, audio_path, stt=None, initial_prompt=None, delete=True):
+        stt = stt or self.stt
         print("[BRAIN] Transcrevendo...")
         start = time.perf_counter()
-        text = self.stt.transcribe(audio_path)
-        self.last_stt_s = time.perf_counter() - start
+        text = stt.transcribe(audio_path, initial_prompt=initial_prompt, delete=delete)
+        self.last_stt_s = (self.last_stt_s or 0) + time.perf_counter() - start
         if not text:
             print("[BRAIN] Nenhum texto transcrito")
             return None
@@ -155,6 +207,7 @@ class Brain:
         return self.transcribe_audio(audio_path)
     
     def think(self, query, on_sentence=None):
+        self._cancelled = False
         self.last_command = None
         self.last_command_s = None
         self.last_llm_s = None
@@ -194,6 +247,9 @@ class Brain:
             parts = []
             pending = ''
             for chunk in self.llm.chat_stream(messages):
+                if self._cancelled:
+                    print("[BRAIN] Stream cancelado")
+                    break
                 pending += chunk
                 while True:
                     m = re.search(r'[.!?](?:\s|$)', pending)
@@ -204,7 +260,11 @@ class Brain:
                     if sentence:
                         parts.append(sentence)
                         on_sentence(sentence)
-            if pending.strip():
+                        if self._cancelled:
+                            break
+                if self._cancelled:
+                    break
+            if pending.strip() and not self._cancelled:
                 parts.append(pending.strip())
                 on_sentence(pending.strip())
             full = ' '.join(parts).strip()

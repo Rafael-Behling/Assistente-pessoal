@@ -42,12 +42,26 @@ class TTS:
             if not exe:
                 continue
             try:
-                result = subprocess.run([exe, *args, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-                if result.returncode == 0:
-                    return
+                proc = subprocess.Popen([exe, *args, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._player_proc = proc
+                proc.wait()
+                return
             except Exception:
                 continue
         print("[TTS] Nenhum player de áudio encontrado")
+
+    def stop(self):
+        proc = getattr(self, '_player_proc', None)
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1)
+                except Exception:
+                    proc.kill()
+            except Exception:
+                pass
+        self._player_proc = None
 
     async def speak_async(self, text, voice=None):
         if not edge_tts:

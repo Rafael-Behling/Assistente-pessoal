@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sexta-Feira
+Comment=Assistente pessoal de voz
+Exec=python3 -u /home/rafael/Documents/Sexta-Feira/sexta-feira/main.py
+Path=/home/rafael/Documents/Sexta-Feira/sexta-feira
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true

@@ -6,14 +6,18 @@ from evdev import ecodes
 
 
 class GlobalHotkey:
-    def __init__(self, callback, name="Ctrl+E"):
+    def __init__(self, callback, hotkey="ctrl+e"):
         self.callback = callback
-        self.name = name
+        parts = [p.strip().lower() for p in hotkey.split('+') if p.strip()]
+        self.ctrl = 'ctrl' in parts
+        key = parts[-1].upper() if parts else 'E'
+        self.key_code = getattr(ecodes, f'KEY_{key}', None) or ecodes.KEY_E
+        self.name = hotkey.upper()
         self.selector = selectors.DefaultSelector()
         self.devices = {}
         self.running = False
         self.thread = None
-        self.ctrl = False
+        self.ctrl_down = False
         self.fired = False
 
     def _find_keyboards(self):
@@ -24,8 +28,8 @@ class GlobalHotkey:
             except Exception:
                 continue
             caps = dev.capabilities().get(ecodes.EV_KEY, [])
-            if ecodes.KEY_A in caps and ecodes.KEY_E in caps and (
-                ecodes.KEY_LEFTCTRL in caps or ecodes.KEY_RIGHTCTRL in caps
+            if ecodes.KEY_A in caps and self.key_code in caps and (
+                not self.ctrl or ecodes.KEY_LEFTCTRL in caps or ecodes.KEY_RIGHTCTRL in caps
             ):
                 keyboards.append(dev)
             else:
@@ -49,7 +53,7 @@ class GlobalHotkey:
             dev.close()
         except Exception:
             pass
-        self.ctrl = False
+        self.ctrl_down = False
         self.fired = False
 
     def _rescan(self):
@@ -59,14 +63,16 @@ class GlobalHotkey:
     def _handle(self, event):
         if event.type != ecodes.EV_KEY:
             return
-        if event.code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
-            self.ctrl = event.value in (1, 2)
+        if self.ctrl and event.code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
+            self.ctrl_down = event.value in (1, 2)
             return
-        if event.code != ecodes.KEY_E:
+        if event.code != self.key_code:
             return
-        if event.value == 1 and self.ctrl and not self.fired:
+        if self.ctrl and not self.ctrl_down:
+            return
+        if event.value == 1 and not self.fired:
             self.fired = True
-            print(f"[HOTKEY] {self.name} - fechando")
+            print(f"[HOTKEY] {self.name} - acionado")
             try:
                 self.callback()
             except Exception as e:

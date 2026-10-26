@@ -4,8 +4,10 @@ Assistente pessoal de voz para Linux (Wayland/X11), com IA local por padrão (Ol
 
 ## O que ela faz
 
-- **Ativação por voz**: só responde quando você chama "Sexta-Feira" (configurável); depois disso fica em conversa aberta e adormece após ~20s sem interação
-- **Voz**: transcrição local (faster-whisper), fala (edge-tts), detecção de fala por VAD (energia ou Silero opcional)
+- **Ativação por voz**: só responde quando você chama "Sexta-Feira" (configurável); depois disso fica em conversa aberta e adormece após ~20s sem interação. O nome é reconhecido com um modelo Whisper `tiny` (resposta rápida) e o comando é transcrito com o modelo principal
+- **Interrupção**: `Ctrl+X` interrompe o que ela está falando/pensando na hora; `Ctrl+E` fecha o orb
+- **Voz**: transcrição local (faster-whisper), fala (edge-tts) em streaming (frase por frase), detecção de fala por VAD (energia ou Silero opcional)
+- **Aquecimento**: o modelo do Ollama é pré-carregado no boot (sem espera na primeira pergunta)
 - **Comandos instantâneos** (sem LLM): horas/data, clima (wttr.in), abrir navegador/sites/pastas/apps, pesquisar na web, organizar área de trabalho, volume, música (playerctl), timers, captura de tela, bloquear tela, notícias (RSS)
 - **Memória**: histórico da conversa durante a sessão; anota fatos que você disser ("lembre que...", "meu nome é...")
 - **Interface**: orb flutuante que reage ao volume da sua voz, muda de cor por estado (azul=escutando, laranja=pensando, verde=falando) e fica apagada fora da sessão
@@ -47,9 +49,16 @@ Na primeira vez abre o menu para escolher a voz; depois o orb aparece no canto d
 
 Exemplos: "que horas são", "como está o tempo", "abre o youtube", "pesquisar receita de bolo", "me avisa em 10 minutos", "próxima música", "lembre que eu gosto de pizza", "o que você sabe sobre mim".
 
+### Iniciar junto com o sistema
+
+```bash
+cp assets/sexta-feira.desktop ~/.config/autostart/
+```
+(Ajuste os caminhos dentro do arquivo para o seu diretório.)
+
 ## Configuração
 
-Edite `config.json` (veja `config.example.json`):
+Edite `config.json` (ou pelo menu gráfico ao abrir sem voz) — veja `config.example.json`:
 
 | Chave | Descrição |
 |---|---|
