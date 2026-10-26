@@ -21,7 +21,10 @@ class Brain:
         self.load_config()
         self.listener = Listener()
         stt_cfg = self.config.get('stt', {})
-        self.stt = STT(model_size=stt_cfg.get('model', 'base'))
+        self.stt = STT(
+            model_size=stt_cfg.get('model', 'base'),
+            language=stt_cfg.get('language', 'pt'),
+        )
         if stt_cfg.get('preload', True):
             threading.Thread(target=self.stt.load_model, daemon=True).start()
         self.tts = TTS(config_path)
@@ -31,13 +34,16 @@ class Brain:
         self.last_transcript = None
         self.last_stt_s = None
         self.last_llm_s = None
+        self.last_command_s = None
         self.last_command = None
+        self.last_model = None
     
     def load_config(self):
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.config = json.load(f)
-        except:
+        except Exception as e:
+            print(f"[BRAIN] Falha ao carregar config: {e}")
             self.config = {}
     
     def init_llm(self):
@@ -75,40 +81,45 @@ class Brain:
     
     def think(self, query):
         self.last_command = None
+        self.last_command_s = None
+        self.last_llm_s = None
+        self.last_model = None
         start = time.perf_counter()
         command = self.commands.run(query)
         if command is not None:
-            self.last_llm_s = time.perf_counter() - start
+            self.last_command_s = time.perf_counter() - start
             self.last_command = command.name
             print(f"[BRAIN] Comando: {command.name} -> {command.response}")
             return command.response
+        self.last_command_s = time.perf_counter() - start
 
         print("[BRAIN] Pensando...")
         llm_cfg = self.config.get('llm', {})
         system_prompt = llm_cfg.get('system_prompt', 'Você é a Sexta-Feira, um assistente pessoal conciso, prático e direto em português.')
-        
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": query}
         ]
-        
+
         start = time.perf_counter()
         response = self.llm.chat(messages)
         self.last_llm_s = time.perf_counter() - start
+        self.last_model = self.llm.model
         if not response:
             response = "Não consegui processar sua solicitação."
-        
+
         print(f"[BRAIN] Resposta: {response}")
         return response
 
     def log_turn(self, transcript, response):
-        model = self.config.get('llm', {}).get('local', {}).get('model')
         self.memory.log_turn(
             transcript,
             response,
             stt_s=self.last_stt_s,
             llm_s=self.last_llm_s,
-            model=model,
+            command_s=self.last_command_s,
+            model=self.last_model,
             command=self.last_command,
         )
     

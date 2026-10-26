@@ -24,6 +24,7 @@
   },
   "stt": {
     "model": "small",
+    "language": "pt",
     "preload": true
   },
   "llm": {

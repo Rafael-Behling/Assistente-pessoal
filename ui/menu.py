@@ -111,11 +111,7 @@ class VoiceMenu(QWidget):
         
     def start_orb(self):
         import subprocess
-        import os
-        env = os.environ.copy()
-        env['QT_QPA_PLATFORM'] = 'xcb'
-        env['PYTHONPATH'] = str(Path(__file__).parent.parent)
-        subprocess.Popen([sys.executable, "-u", str(Path(__file__).parent / "orb.py")], env=env, cwd=str(Path(__file__).parent.parent))
+        subprocess.Popen([sys.executable, "-u", str(Path(__file__).parent / "orb.py")], cwd=str(Path(__file__).parent.parent))
 
 def main():
     app = QApplication(sys.argv)

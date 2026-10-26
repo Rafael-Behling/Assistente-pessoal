@@ -381,7 +381,7 @@ class Commands:
         ], self.cmd_open_app)
 
         self._add('help', [
-            r'\b(?:o que voce pode fazer|quais comandos|comandos disponiveis|ajuda)\b',
+            r'\b(?:o que voce pode fazer|quais comandos|comandos disponiveis|ajud(?:a|ar|e))\b',
         ], self.cmd_help)
 
     def run(self, text):

@@ -12,7 +12,7 @@ class Memory:
             base_dir = Path(__file__).parent.parent / base_dir
         self.dir = base_dir / "conversas"
 
-    def log_turn(self, transcript, response, stt_s=None, llm_s=None, model=None, command=None):
+    def log_turn(self, transcript, response, stt_s=None, llm_s=None, command_s=None, model=None, command=None):
         if not self.enabled:
             return
         try:
@@ -22,12 +22,15 @@ class Memory:
                 "ts": now.isoformat(timespec='seconds'),
                 "voce": transcript,
                 "sexta": response,
-                "stt_s": round(stt_s, 2) if stt_s is not None else None,
-                "llm_s": round(llm_s, 2) if llm_s is not None else None,
-                "model": model,
             }
             if command:
                 entry["command"] = command
+            if command_s is not None:
+                entry["command_s"] = round(command_s, 2)
+            if llm_s is not None:
+                entry["llm_s"] = round(llm_s, 2)
+            if model:
+                entry["model"] = model
             path = self.dir / f"{now:%Y-%m-%d}.jsonl"
             with open(path, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")

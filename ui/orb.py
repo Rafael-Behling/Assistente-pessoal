@@ -1,5 +1,6 @@
 import sys
 import math
+import time
 import random
 import os
 from pathlib import Path
@@ -101,14 +102,15 @@ class OrbWidget(QWidget):
             self.state_signal.emit("listening")
 
     def update_pulse(self):
+        t = time.monotonic()
         if self.state == "idle":
-            self.target_radius = self.base_radius + math.sin(self.pulse_timer.remainingTime() * 0.01) * 1.5
+            self.target_radius = self.base_radius + math.sin(t * 2.0) * 1.5
         elif self.state == "listening":
             self.target_radius = self.base_radius + random.randint(-2, 2)
         elif self.state == "speaking":
             self.target_radius = self.base_radius + random.randint(-4, 4)
         elif self.state == "thinking":
-            self.target_radius = self.base_radius + math.sin(self.pulse_timer.remainingTime() * 0.02) * 3
+            self.target_radius = self.base_radius + math.sin(t * 4.0) * 3
         else:
             self.target_radius = self.base_radius
 

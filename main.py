@@ -1,6 +1,5 @@
 import sys
 import json
-import os
 import fcntl
 import subprocess
 from pathlib import Path
@@ -33,13 +32,8 @@ def main():
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
         if config.get('voice'):
-            env = os.environ.copy()
-            env['QT_QPA_PLATFORM'] = 'xcb'
-            env['PYTHONPATH'] = str(Path(__file__).parent)
-
             orb_proc = subprocess.Popen(
                 [sys.executable, "-u", str(Path(__file__).parent / "ui" / "orb.py")],
-                env=env,
                 cwd=str(Path(__file__).parent),
             )
 

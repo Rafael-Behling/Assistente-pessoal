@@ -7,11 +7,12 @@ from scipy.io import wavfile
 
 
 class STT:
-    def __init__(self, model_size="base", device="cpu", compute_type="int8"):
+    def __init__(self, model_size="base", device="cpu", compute_type="int8", language="pt"):
         self.model = None
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
+        self.language = language
         self._lock = threading.Lock()
 
     def load_model(self):
@@ -60,7 +61,7 @@ class STT:
         gain = min(4.0, 0.9 / peak)
         return (audio * gain).astype(np.float32)
 
-    def transcribe(self, audio_path, language="pt"):
+    def transcribe(self, audio_path, language=None):
         if not os.path.exists(audio_path):
             return ""
         self.load_model()
@@ -68,7 +69,7 @@ class STT:
             audio, sample_rate = self._read_audio(audio_path)
             segments, info = self.model.transcribe(
                 audio,
-                language=language,
+                language=language or self.language,
                 beam_size=5,
                 vad_filter=False,
                 condition_on_previous_text=False,

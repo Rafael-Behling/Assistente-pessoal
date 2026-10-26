@@ -1,6 +1,9 @@
 import json
 import os
 import asyncio
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 try:
@@ -20,7 +23,7 @@ class TTS:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.config = json.load(f)
         except:
-            self.config = {"voice": null, "volume": 1.0, "rate": 1.0}
+            self.config = {"voice": None, "volume": 1.0, "rate": 1.0}
     
     def save_config(self):
         with open(self.config_path, 'w', encoding='utf-8') as fjson:
@@ -29,6 +32,23 @@ class TTS:
     def get_voice(self):
         return self.config.get("voice")
     
+    def _play_audio(self, path):
+        players = {
+            'mpv': ['--no-video', '--quiet'],
+            'ffplay': ['-nodisp', '-autoexit', '-loglevel', 'quiet'],
+        }
+        for player, args in players.items():
+            exe = shutil.which(player)
+            if not exe:
+                continue
+            try:
+                result = subprocess.run([exe, *args, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                if result.returncode == 0:
+                    return
+            except Exception:
+                continue
+        print("[TTS] Nenhum player de áudio encontrado")
+
     async def speak_async(self, text, voice=None):
         if not edge_tts:
             print("edge-tts não instalado")
@@ -37,9 +57,18 @@ class TTS:
         if not voice:
             print("Nenhuma voz selecionada")
             return
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save("/tmp/sexta-feira-speech.mp3")
-        os.system("mpv --no-video --quiet /tmp/sexta-feira-speech.mp3 2>/dev/null || ffplay -nodisp -autoexit /tmp/sexta-feira-speech.mp3 2>/dev/null || aplay 2>/dev/null")
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp3')
+        path = temp.name
+        temp.close()
+        try:
+            communicate = edge_tts.Communicate(text, voice)
+            await communicate.save(path)
+            await asyncio.to_thread(self._play_audio, path)
+        finally:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
     
     def speak(self, text, voice=None):
         asyncio.run(self.speak_async(text, voice))
