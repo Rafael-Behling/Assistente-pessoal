@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.env
+.env.*
+data/*
+!data/.gitkeep
+*.log
+*.wav
+*.mp3
+.DS_Store

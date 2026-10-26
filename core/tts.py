@@ -1,0 +1,66 @@
+import json
+import os
+import asyncio
+from pathlib import Path
+
+try:
+    import edge_tts
+except ImportError:
+    edge_tts = None
+
+class TTS:
+    def __init__(self, config_path=None):
+        if config_path is None:
+            config_path = Path(__file__).parent.parent / "config.json"
+        self.config_path = config_path
+        self.load_config()
+    
+    def load_config(self):
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                self.config = json.load(f)
+        except:
+            self.config = {"voice": null, "volume": 1.0, "rate": 1.0}
+    
+    def save_config(self):
+        with open(self.config_path, 'w', encoding='utf-8') as fjson:
+            json.dump(self.config, fjson, indent=2, ensure_ascii=False)
+    
+    def get_voice(self):
+        return self.config.get("voice")
+    
+    async def speak_async(self, text, voice=None):
+        if not edge_tts:
+            print("edge-tts não instalado")
+            return
+        voice = voice or self.get_voice()
+        if not voice:
+            print("Nenhuma voz selecionada")
+            return
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save("/tmp/sexta-feira-speech.mp3")
+        os.system("mpv --no-video --quiet /tmp/sexta-feira-speech.mp3 2>/dev/null || ffplay -nodisp -autoexit /tmp/sexta-feira-speech.mp3 2>/dev/null || aplay 2>/dev/null")
+    
+    def speak(self, text, voice=None):
+        asyncio.run(self.speak_async(text, voice))
+    
+    @staticmethod
+    async def _list_voices_async():
+        if not edge_tts:
+            return []
+        voices = await edge_tts.list_voices()
+        voices.sort(key=lambda x: (x['Locale'], x['ShortName']))
+        return voices
+    
+    @staticmethod
+    def list_voices():
+        if not edge_tts:
+            return []
+        try:
+            return asyncio.run(TTS._list_voices_async())
+        except Exception:
+            try:
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(TTS._list_voices_async())
+            except Exception:
+                return []

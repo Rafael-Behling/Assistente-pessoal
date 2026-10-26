@@ -1,0 +1,45 @@
+{
+  "voice": "pt-BR-FranciscaNeural",
+  "volume": 1.0,
+  "rate": 1.0,
+  "activation": {
+    "type": "vad",
+    "mode": "always_on"
+  },
+  "vad": {
+    "energy_threshold": 0.0015,
+    "noise_multiplier": 2.5,
+    "min_speech_ms": 200,
+    "end_silence_ms": 700,
+    "pre_roll_ms": 900,
+    "max_utterance_s": 15,
+    "calibration_ms": 2000,
+    "start_frames": 4,
+    "device": null,
+    "debug": false
+  },
+  "memory": {
+    "save_transcripts": true,
+    "dir": "data"
+  },
+  "stt": {
+    "model": "small",
+    "preload": true
+  },
+  "llm": {
+    "mode": "local",
+    "local": {
+      "provider": "ollama",
+      "model": "qwen2.5:3b",
+      "url": "http://localhost:11434",
+      "keep_alive": "30m"
+    },
+    "api": {
+      "provider": "openrouter",
+      "model": "google/gemini-2.5-flash",
+      "url": "https://openrouter.ai/api/v1/chat/completions",
+      "api_key": ""
+    },
+    "system_prompt": "Você é a Sexta-Feira, um assistente pessoal conciso, prático e direto em português. Você pode ver horas e data, abrir o navegador, pesquisar na web, abrir pastas e aplicativos, organizar a área de trabalho, controlar o volume, tirar capturas de tela e bloquear a tela. Responda em no máximo duas frases."
+  }
+}
