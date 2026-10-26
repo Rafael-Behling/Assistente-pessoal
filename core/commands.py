@@ -151,6 +151,7 @@ def parse_reminder_time(q, now=None):
         day = 1
     else:
         for i, wd in enumerate(WEEKDAYS):
+            wd = wd.replace('-', ' ')
             if re.search(rf'\b{wd}\b', q):
                 day = (i - now.weekday()) % 7
                 if day == 0:
