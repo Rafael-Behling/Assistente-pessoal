@@ -1,0 +1,12 @@
+PyQt6
+numpy
+scipy
+sounddevice
+faster-whisper
+edge-tts
+httpx
+evdev
+pytest
+
+# Opcional (VAD por rede neural, detecta fala melhor que energia):
+# silero-vad

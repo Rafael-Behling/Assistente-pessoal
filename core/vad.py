@@ -27,6 +27,20 @@ class VADListener:
         self.start_frames = cfg.get('start_frames', 5)
         self.device = cfg.get('device', None)
         self.debug = cfg.get('debug', False)
+        self.engine = cfg.get('engine', 'energy')
+        self.prob_threshold = cfg.get('prob_threshold', 0.5)
+        self._silero = None
+        self._torch = None
+        if self.engine == 'silero':
+            try:
+                from silero_vad import load_silero_vad
+                import torch
+                self._silero = load_silero_vad()
+                self._torch = torch
+                print("[VAD] Motor Silero ativado")
+            except Exception as e:
+                print(f"[VAD] Silero indisponível ({e}); usando motor de energia")
+                self.engine = 'energy'
 
         self.pre_roll_frames = max(1, int(self.pre_roll_ms / block_ms))
         self.max_frames = int(self.max_utterance_s * 1000 / block_ms)
@@ -37,11 +51,14 @@ class VADListener:
         self.stream = None
         self.thread = None
         self.noise_floor = None
+        self.current_rms = 0.0
 
     def _callback(self, indata, frames, time_info, status):
         if self.paused or not self.running:
             return
-        self.queue.put(indata[:, 0].copy())
+        frame = indata[:, 0]
+        self.current_rms = float(np.sqrt(np.mean(frame ** 2)))
+        self.queue.put(frame.copy())
 
     def _drain(self):
         while True:
@@ -90,29 +107,38 @@ class VADListener:
             if self.paused:
                 continue
 
-            rms = float(np.sqrt(np.mean(frame ** 2)))
+            if self.engine == 'silero' and self._silero is not None:
+                prob = float(self._silero(self._torch.from_numpy(frame), self.sample_rate).item())
+                level = prob
+                threshold = self.prob_threshold
+                above = prob > self.prob_threshold
+            else:
+                rms = float(np.sqrt(np.mean(frame ** 2)))
 
-            if self.noise_floor is None:
-                calib.append(rms)
-                if len(calib) >= calib_frames:
-                    self.noise_floor = float(np.percentile(calib, 20))
-                    threshold = max(self.energy_threshold, self.noise_floor * self.noise_multiplier)
-                    print(f"[VAD] Calibrado: ruído={self.noise_floor:.4f} limiar={threshold:.4f}")
-                continue
+                if self.noise_floor is None:
+                    calib.append(rms)
+                    if len(calib) >= calib_frames:
+                        self.noise_floor = float(np.percentile(calib, 20))
+                        threshold = max(self.energy_threshold, self.noise_floor * self.noise_multiplier)
+                        print(f"[VAD] Calibrado: ruído={self.noise_floor:.4f} limiar={threshold:.4f}")
+                    continue
 
-            threshold = max(self.energy_threshold, self.noise_floor * self.noise_multiplier)
-
-            if not speaking and rms < threshold * 0.8:
-                self.noise_floor = 0.98 * self.noise_floor + 0.02 * rms
                 threshold = max(self.energy_threshold, self.noise_floor * self.noise_multiplier)
 
+                if not speaking and rms < threshold * 0.8:
+                    self.noise_floor = 0.98 * self.noise_floor + 0.02 * rms
+                    threshold = max(self.energy_threshold, self.noise_floor * self.noise_multiplier)
+
+                level = rms
+                above = rms > threshold
+
             if self.debug and time.time() - last_debug > 1.0:
-                print(f"[VAD] rms={rms:.4f} limiar={threshold:.4f} speaking={speaking}")
+                print(f"[VAD] nível={level:.4f} limiar={threshold:.4f} speaking={speaking}")
                 last_debug = time.time()
 
             if not speaking:
                 pre_roll.append(frame)
-                if rms > threshold:
+                if above:
                     above_count += 1
                     if above_count >= self.start_frames:
                         speaking = True
@@ -124,7 +150,7 @@ class VADListener:
                     above_count = 0
             else:
                 utterance.append(frame)
-                if rms > threshold:
+                if above:
                     voiced_ms += self.block_ms
                     silence_ms = 0
                 else:

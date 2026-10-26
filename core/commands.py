@@ -1,11 +1,17 @@
+import json
 import re
 import shutil
 import subprocess
+import threading
+import time
 import unicodedata
 import webbrowser
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
+
+import httpx
 
 
 class CommandResult:
@@ -115,8 +121,9 @@ APPS = {
 }
 
 HELP_TEXT = (
-    'Posso ver as horas e a data, abrir o navegador, pesquisar na web, abrir pastas e aplicativos, '
-    'organizar a área de trabalho, controlar o volume, tirar capturas de tela e bloquear a tela.'
+    'Posso ver as horas e a data, o clima, abrir o navegador, pesquisar na web, abrir pastas e aplicativos, '
+    'organizar a área de trabalho, controlar o volume e a música, tirar capturas de tela, definir timers, '
+    'ler notícias, anotar coisas que você me diz e bloquear a tela.'
 )
 
 
@@ -329,7 +336,9 @@ def _screenshot_tool():
 
 
 class Commands:
-    def __init__(self):
+    def __init__(self, memory=None, config=None):
+        self.memory = memory
+        self.config = config or {}
         self._items = []
         self._register()
 
@@ -340,6 +349,12 @@ class Commands:
         self._add('time', [
             r'\b(?:que horas|que hora|horas sao|ver as horas|me (?:diga|diz|fala) as horas|hora agora|horario agora|horas agora|qual (?:e )?o horario)\b',
             r'\b(?:que dia|qual (?:e )?o dia|qual (?:e )?a data|data de hoje|dia de hoje|que data)\b',
+            r'\b(?:em que (?:dia|data|mes|ano)|que (?:dia|data|mes|ano)) (?:da semana )?(?:e|estamos|hoje|hj)\b',
+            r'\b(?:dia|data|mes|ano) (?:de )?(?:hoje|hj)\b',
+            r'\b(?:mes|ano|data) atual\b',
+            r'\b(?:que dia da semana|qual (?:e )?o dia da semana)\b',
+            r'\b(?:que mes|qual (?:e )?o mes|que ano|qual (?:e )?o ano|em que ano estamos|em que mes estamos)\b',
+            r'\bquantos dias (?:tem|faltam)\b',
         ], self.cmd_time)
 
         self._add('organize_desktop', [
@@ -376,6 +391,41 @@ class Commands:
             r'\b(?:volume|som)\b.*\d',
         ], self.cmd_volume)
 
+        self._add('weather', [
+            r'\b(?:como (?:esta|ta|vai ser)|qual (?:e )?)\s*(?:o\s+)?(?:tempo|clima)\b',
+            r'\b(?:previsao (?:do tempo)?|vai chover|esta chovendo|ta chovendo)\b',
+            r'\btemperatura\b',
+            r'\b(?:fazer calor|fazer frio|tá calor|tá frio|frio ai|calor ai)\b',
+        ], self.cmd_weather)
+
+        self._add('timer', [
+            r'\b(?:timer|cronometro|temporizador|alarme|aviso)\b',
+            r'\b(?:me )?avis\w*\b.*\b(?:em|daqui)\b',
+            r'\bdaqui (?:a )?\d+\s*(?:segundos?|minutos?|horas?)\b',
+        ], self.cmd_timer)
+
+        self._add('media', [
+            r'\b(?:paus\w*|despaus\w*|parar|continuar|tocar|play|proxim\w*|pular|avanca)\b.*\b(?:musica|som|video|media|spotify|player|track)\b',
+            r'\b(?:musica|som|video|media|player|spotify)\b.*\b(?:paus\w*|parar|toc\w*|proxim\w*|pular|avanca)\b',
+            r'\b(?:paus\w*|despaus\w*|tocar|play|proxim\w*|pular)\b',
+        ], self.cmd_media)
+
+        self._add('news', [
+            r'\b(?:noticias|manchetes|novidades|o que esta acontecendo)\b',
+        ], self.cmd_news)
+
+        self._add('remember', [
+            r'\b(?:lembre(?:-se)?(?:\s+(?:que|de))?|grava(?: que)?|anota(?: que)?|meu nome e|me chamo)\b',
+        ], self.cmd_remember)
+
+        self._add('recall', [
+            r'\b(?:o que voce sabe sobre mim|minhas informacoes|o que voce lembra de mim|o que sabe de mim)\b',
+        ], self.cmd_recall)
+
+        self._add('forget', [
+            r'\b(?:esquece tudo|esqueca tudo|apague tudo|limpe suas informacoes|apaga suas informacoes)\b',
+        ], self.cmd_forget)
+
         self._add('open_app', [
             r'\b(?:abrir|abre|abra|iniciar|inicie|executar|execute|rodar|roda)\b\s+(?:o|a|os|as)?\s*.+',
         ], self.cmd_open_app)
@@ -404,8 +454,14 @@ class Commands:
 
     def cmd_time(self, original, q):
         now = datetime.now()
-        wants_date = bool(re.search(r'\b(?:dia|data)\b', q))
         wants_time = bool(re.search(r'\b(?:hora|horas|horario)\b', q))
+        wants_month = bool(re.search(r'\b(?:mes|meses)\b', q))
+        wants_year = bool(re.search(r'\bano\b', q))
+        wants_date = bool(re.search(r'\b(?:dia|data|semana)\b', q))
+        if wants_year and not wants_month:
+            return f'Estamos no ano de {now.year}.'
+        if wants_month:
+            return f'Estamos em {MONTHS[now.month - 1]} de {now.year}.'
         if wants_date and not wants_time:
             return format_date(now)
         if wants_time and not wants_date:
@@ -517,6 +573,98 @@ class Commands:
             if _launch_desktop(desktop_id, path):
                 return f'Abrindo {display}.'
         return f'Não encontrei o aplicativo {name}.'
+
+    def cmd_weather(self, original, q):
+        location = (self.config.get('weather') or {}).get('location', '')
+        url = f'https://wttr.in/{quote_plus(location)}?format=j1&lang=pt' if location else 'https://wttr.in/?format=j1&lang=pt'
+        try:
+            r = httpx.get(url, timeout=8, headers={'User-Agent': 'curl/8'})
+            r.raise_for_status()
+            data = r.json()
+            cur = data['current_condition'][0]
+            desc = (cur.get('lang_pt') or [{}])[0].get('value') or (cur.get('weatherDesc') or [{}])[0].get('value', '')
+            today = data['weather'][0]
+            resp = f'{desc}: {cur["temp_C"]} graus, sensação de {cur["FeelsLikeC"]}. Máxima {today["maxtempC"]}, mínima {today["mintempC"]}, umidade {cur["humidity"]}%.'
+            return f'Em {location}, {resp}' if location else resp
+        except Exception as e:
+            print(f'[COMMANDS] Erro no clima: {e}')
+            return 'Não consegui pegar a previsão do tempo.'
+
+    def cmd_timer(self, original, q):
+        m = re.search(r'(\d+)\s*(segundos?|minutos?|horas?)', q)
+        if not m:
+            return 'Quanto tempo você quer no timer?'
+        n = int(m.group(1))
+        unit = m.group(2)
+        seconds = n * (3600 if unit.startswith('hora') else 60 if unit.startswith('minuto') else 1)
+        if seconds < 1 or seconds > 86400:
+            return 'Esse tempo é estranho. Tente outro.'
+        label = f'{n} {unit}'
+        def ring():
+            try:
+                _run(['notify-send', '-a', 'Sexta-Feira', 'Sexta-Feira', f'Tempo esgotado: {label}'])
+            except Exception:
+                pass
+            print(f"[TIMER] Tempo esgotado: {label}")
+        timer = threading.Timer(seconds, ring)
+        timer.daemon = True
+        timer.start()
+        return f'Ok, aviso em {label}.'
+
+    def cmd_media(self, original, q):
+        exe = shutil.which('playerctl')
+        if not exe:
+            return 'playerctl não está instalado.'
+        if re.search(r'\b(?:proxim\w*|pular|avanca)\b', q):
+            action, msg = 'next', 'Próxima.'
+        elif re.search(r'\b(?:paus\w*|parar)\b', q):
+            action, msg = 'pause', 'Pausado.'
+        elif re.search(r'\b(?:tocar|play|continuar|despaus\w*)\b', q):
+            action, msg = 'play', 'Tocando.'
+        else:
+            action, msg = 'play-pause', 'Alternado.'
+        try:
+            subprocess.run([exe, action], timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return msg
+        except Exception:
+            return 'Não consegui controlar o player.'
+
+    def cmd_news(self, original, q):
+        try:
+            r = httpx.get('https://g1.globo.com/rss/g1/', timeout=8, headers={'User-Agent': 'Mozilla/5.0'})
+            r.raise_for_status()
+            root = ET.fromstring(r.content)
+            titles = [i.findtext('title', '').strip() for i in root.iter('item')][:4]
+            titles = [t for t in titles if t]
+            if not titles:
+                return 'Não encontrei notícias agora.'
+            return 'Manchetes: ' + ' | '.join(titles)
+        except Exception as e:
+            print(f'[COMMANDS] Erro nas notícias: {e}')
+            return 'Não consegui buscar as notícias.'
+
+    def cmd_remember(self, original, q):
+        m = re.search(r'\b(?:lembre(?:-se)?(?:\s+(?:que|de))?|grava(?: que)?|anota(?: que)?|meu nome e|me chamo)\b\s*(.+)$', q)
+        fact = (m.group(1) if m else '').strip(' ,.!?;:')
+        if not fact:
+            return 'O que você quer que eu anote?'
+        if re.search(r'\b(?:meu nome e|me chamo)\b', q):
+            fact = f'O nome do usuário é {fact}.'
+        if self.memory:
+            self.memory.remember_fact(fact)
+            return 'Anotado.'
+        return 'Não tenho memória disponível.'
+
+    def cmd_recall(self, original, q):
+        facts = self.memory.load_facts() if self.memory else []
+        if not facts:
+            return 'Ainda não anotei nada sobre você.'
+        return 'Lembrando: ' + ' '.join(facts)
+
+    def cmd_forget(self, original, q):
+        if self.memory:
+            self.memory.clear_facts()
+        return 'Apaguei tudo que sabia sobre você.'
 
     def cmd_screenshot(self, original, q):
         tool, path = _screenshot_tool()

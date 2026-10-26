@@ -11,6 +11,34 @@ class Memory:
         if not base_dir.is_absolute():
             base_dir = Path(__file__).parent.parent / base_dir
         self.dir = base_dir / "conversas"
+        self.facts_path = base_dir / "fatos.json"
+
+    def load_facts(self):
+        try:
+            with open(self.facts_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def remember_fact(self, fact):
+        try:
+            facts = self.load_facts()
+            fact = fact.strip()
+            if fact and fact not in facts:
+                facts.append(fact)
+                self.facts_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(self.facts_path, 'w', encoding='utf-8') as f:
+                    json.dump(facts, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[MEMORY] Falha ao salvar fato: {e}")
+
+    def clear_facts(self):
+        try:
+            self.facts_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.facts_path, 'w', encoding='utf-8') as f:
+                json.dump([], f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[MEMORY] Falha ao limpar fatos: {e}")
 
     def log_turn(self, transcript, response, stt_s=None, llm_s=None, command_s=None, model=None, command=None):
         if not self.enabled:
